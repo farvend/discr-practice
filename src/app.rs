@@ -46,7 +46,7 @@ impl eframe::App for HasseBootstrapApp {
         ctx.set_visuals(visuals);
 
         egui::SidePanel::left("matrix_controls")
-            .resizable(false)
+            .resizable(true)
             .default_width(360.0)
             .min_width(320.0)
             .show(ctx, |ui| {
