@@ -24,6 +24,97 @@ pub struct HasseLayout {
 }
 
 impl HasseLayout {
+    pub fn new(
+        node_count: usize,
+        cover_edges: &[HasseCoverEdge],
+    ) -> Result<Self, HasseLayoutError> {
+        if node_count == 0 {
+            return Err(HasseLayoutError::InvalidNodeCount { node_count });
+        }
+
+        let mut successors = vec![Vec::new(); node_count + 1];
+        let mut incoming_counts = vec![0usize; node_count + 1];
+
+        for &(lower, upper) in cover_edges {
+            if !(1..=node_count).contains(&lower) || !(1..=node_count).contains(&upper) {
+                return Err(HasseLayoutError::EdgeOutOfBounds {
+                    edge: (lower, upper),
+                    node_count,
+                });
+            }
+
+            successors[lower].push(upper);
+            incoming_counts[upper] += 1;
+        }
+
+        for targets in successors.iter_mut().skip(1) {
+            targets.sort_unstable();
+        }
+
+        let mut ready = std::collections::BTreeSet::new();
+
+        for label in 1..=node_count {
+            if incoming_counts[label] == 0 {
+                ready.insert(label);
+            }
+        }
+
+        let mut topological_order = Vec::with_capacity(node_count);
+
+        while let Some(&label) = ready.iter().next() {
+            ready.remove(&label);
+            topological_order.push(label);
+
+            for &upper in &successors[label] {
+                incoming_counts[upper] -= 1;
+                if incoming_counts[upper] == 0 {
+                    ready.insert(upper);
+                }
+            }
+        }
+
+        if topological_order.len() != node_count {
+            return Err(HasseLayoutError::CycleDetected);
+        }
+
+        let mut levels = vec![0usize; node_count + 1];
+
+        for &lower in &topological_order {
+            let next_level = levels[lower] + 1;
+            for &upper in &successors[lower] {
+                levels[upper] = levels[upper].max(next_level);
+            }
+        }
+
+        let level_count = levels.iter().skip(1).copied().max().unwrap_or(0) + 1;
+        let mut levels_to_labels = vec![Vec::new(); level_count];
+
+        for label in 1..=node_count {
+            levels_to_labels[levels[label]].push(label);
+        }
+
+        let mut indices_in_level = vec![0usize; node_count + 1];
+
+        for labels in &mut levels_to_labels {
+            labels.sort_unstable();
+
+            for (index_in_level, &label) in labels.iter().enumerate() {
+                indices_in_level[label] = index_in_level;
+            }
+        }
+
+        Ok(Self {
+            nodes: (1..=node_count)
+                .map(|label| HasseLayoutNode {
+                    label,
+                    level: levels[label],
+                    index_in_level: indices_in_level[label],
+                })
+                .collect(),
+            level_widths: levels_to_labels.iter().map(Vec::len).collect(),
+        })
+    }
+
     pub fn nodes(&self) -> &[HasseLayoutNode] {
         &self.nodes
     }
@@ -60,100 +151,9 @@ impl HasseLayout {
     }
 }
 
-pub fn layout_hasse_nodes(
-    node_count: usize,
-    cover_edges: &[HasseCoverEdge],
-) -> Result<HasseLayout, HasseLayoutError> {
-    if node_count == 0 {
-        return Err(HasseLayoutError::InvalidNodeCount { node_count });
-    }
-
-    let mut successors = vec![Vec::new(); node_count + 1];
-    let mut incoming_counts = vec![0usize; node_count + 1];
-
-    for &(lower, upper) in cover_edges {
-        if !(1..=node_count).contains(&lower) || !(1..=node_count).contains(&upper) {
-            return Err(HasseLayoutError::EdgeOutOfBounds {
-                edge: (lower, upper),
-                node_count,
-            });
-        }
-
-        successors[lower].push(upper);
-        incoming_counts[upper] += 1;
-    }
-
-    for targets in successors.iter_mut().skip(1) {
-        targets.sort_unstable();
-    }
-
-    let mut ready = std::collections::BTreeSet::new();
-
-    for label in 1..=node_count {
-        if incoming_counts[label] == 0 {
-            ready.insert(label);
-        }
-    }
-
-    let mut topological_order = Vec::with_capacity(node_count);
-
-    while let Some(&label) = ready.iter().next() {
-        ready.remove(&label);
-        topological_order.push(label);
-
-        for &upper in &successors[label] {
-            incoming_counts[upper] -= 1;
-            if incoming_counts[upper] == 0 {
-                ready.insert(upper);
-            }
-        }
-    }
-
-    if topological_order.len() != node_count {
-        return Err(HasseLayoutError::CycleDetected);
-    }
-
-    let mut levels = vec![0usize; node_count + 1];
-
-    for &lower in &topological_order {
-        let next_level = levels[lower] + 1;
-        for &upper in &successors[lower] {
-            levels[upper] = levels[upper].max(next_level);
-        }
-    }
-
-    let level_count = levels.iter().skip(1).copied().max().unwrap_or(0) + 1;
-    let mut levels_to_labels = vec![Vec::new(); level_count];
-
-    for label in 1..=node_count {
-        levels_to_labels[levels[label]].push(label);
-    }
-
-    let mut indices_in_level = vec![0usize; node_count + 1];
-
-    for labels in &mut levels_to_labels {
-        labels.sort_unstable();
-
-        for (index_in_level, &label) in labels.iter().enumerate() {
-            indices_in_level[label] = index_in_level;
-        }
-    }
-
-    Ok(HasseLayout {
-        nodes: (1..=node_count)
-            .map(|label| HasseLayoutNode {
-                label,
-                level: levels[label],
-                index_in_level: indices_in_level[label],
-            })
-            .collect(),
-        level_widths: levels_to_labels.iter().map(Vec::len).collect(),
-    })
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{layout_hasse_nodes, HasseLayoutNode};
+    use super::{HasseLayout, HasseLayoutNode};
     use crate::relation_matrix::{RelationMatrix, RelationMatrixError};
 
     fn matrix_with_true_pairs(
@@ -190,9 +190,9 @@ mod tests {
             .hasse_cover_edges()
             .expect("valid partial order must yield cover edges");
 
-        let first = layout_hasse_nodes(matrix.size(), &cover_edges)
+        let first = HasseLayout::new(matrix.size(), &cover_edges)
             .expect("layout should succeed for valid cover edges");
-        let second = layout_hasse_nodes(matrix.size(), &cover_edges)
+        let second = HasseLayout::new(matrix.size(), &cover_edges)
             .expect("layout should be repeatable");
 
         assert_eq!(first, second);
@@ -206,7 +206,7 @@ mod tests {
             .hasse_cover_edges()
             .expect("valid partial order must yield cover edges");
 
-        let layout = layout_hasse_nodes(matrix.size(), &cover_edges)
+        let layout = HasseLayout::new(matrix.size(), &cover_edges)
             .expect("layout should succeed for valid cover edges");
         let labels: Vec<usize> = layout.nodes().iter().map(|node| node.label).collect();
 
@@ -239,7 +239,7 @@ mod tests {
             .hasse_cover_edges()
             .expect("valid partial order must yield cover edges");
 
-        let layout = layout_hasse_nodes(matrix.size(), &cover_edges)
+        let layout = HasseLayout::new(matrix.size(), &cover_edges)
             .expect("layout should succeed for valid cover edges");
 
         for (lower, upper) in cover_edges {
@@ -278,7 +278,7 @@ mod tests {
             .hasse_cover_edges()
             .expect("valid partial order must yield cover edges");
 
-        let layout = layout_hasse_nodes(matrix.size(), &cover_edges)
+        let layout = HasseLayout::new(matrix.size(), &cover_edges)
             .expect("layout should succeed for valid cover edges");
 
         assert_eq!(layout.level_count(), 3);

@@ -1,5 +1,5 @@
 use crate::bootstrap::BootstrapState;
-use crate::hasse_layout::{HasseLayout, layout_hasse_nodes};
+use crate::hasse_layout::HasseLayout;
 use crate::relation_matrix::{
     HasseCoverEdge, MAX_RELATION_SIZE, MIN_RELATION_SIZE, PartialOrderDiagnostics, RelationMatrix,
 };
@@ -260,7 +260,7 @@ impl HasseGuiState {
                     .hasse_cover_edges()
                     .expect("validated partial order must produce cover edges");
 
-                match layout_hasse_nodes(self.relation_matrix.size(), &cover_edges) {
+                match HasseLayout::new(self.relation_matrix.size(), &cover_edges) {
                     Ok(layout) => {
                         let edge_count = cover_edges.len();
                         let level_count = layout.level_count();
