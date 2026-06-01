@@ -14,20 +14,78 @@ pub enum RelationMatrixError {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AntisymmetryWitness {
+    pub left: usize,
+    pub right: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TransitivityWitness {
+    pub source: usize,
+    pub middle: usize,
+    pub target: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HasseCoverEdge {
+    pub lower: usize,
+    pub upper: usize,
+}
+
+impl std::fmt::Display for HasseCoverEdge {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "({}, {})", self.lower, self.upper)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartialOrderDiagnostics {
     pub reflexivity_witness: Option<usize>,
-    pub antisymmetry_witness: Option<(usize, usize)>,
-    pub transitivity_witness: Option<(usize, usize, usize)>,
+    pub antisymmetry_witness: Option<AntisymmetryWitness>,
+    pub transitivity_witness: Option<TransitivityWitness>,
 }
-
-pub type HasseCoverEdge = (usize, usize);
 
 impl PartialOrderDiagnostics {
     pub fn is_valid(&self) -> bool {
         self.reflexivity_witness.is_none()
             && self.antisymmetry_witness.is_none()
             && self.transitivity_witness.is_none()
+    }
+
+    pub fn report_messages(&self) -> Vec<String> {
+        let mut messages = vec!["- Нарушены условия частичного порядка:".to_owned()];
+
+        match self.reflexivity_witness {
+            Some(element) => messages.push(format!(
+                "  • Рефлексивность нарушена: ({0}, {0}) = 0.",
+                element
+            )),
+            None => messages.push("  • Рефлексивность: OK.".to_owned()),
+        }
+
+        match self.antisymmetry_witness {
+            Some(witness) => messages.push(format!(
+                "  • Антисимметричность нарушена: ({}, {}) = 1 и ({}, {}) = 1.",
+                witness.left, witness.right, witness.right, witness.left,
+            )),
+            None => messages.push("  • Антисимметричность: OK.".to_owned()),
+        }
+
+        match self.transitivity_witness {
+            Some(witness) => messages.push(format!(
+                "  • Транзитивность нарушена: ({}, {}) = 1 и ({}, {}) = 1, но ({}, {}) = 0.",
+                witness.source,
+                witness.middle,
+                witness.middle,
+                witness.target,
+                witness.source,
+                witness.target,
+            )),
+            None => messages.push("  • Транзитивность: OK.".to_owned()),
+        }
+
+        messages
     }
 }
 
@@ -39,7 +97,7 @@ pub struct RelationMatrix {
 
 impl RelationMatrix {
     pub fn new(size: usize) -> Result<Self, RelationMatrixError> {
-        validate_size(size)?;
+        Self::validate_size(size)?;
 
         Ok(Self {
             size,
@@ -93,7 +151,7 @@ impl RelationMatrix {
                 }
 
                 if !self.has_intermediate_between(lower, upper) {
-                    edges.push((lower, upper));
+                    edges.push(HasseCoverEdge { lower, upper });
                 }
             }
         }
@@ -102,10 +160,33 @@ impl RelationMatrix {
     }
 
     fn index_of(&self, row: usize, column: usize) -> Result<usize, RelationMatrixError> {
-        validate_element(row, self.size)?;
-        validate_element(column, self.size)?;
+        self.validate_element(row)?;
+        self.validate_element(column)?;
 
         Ok((row - 1) * self.size + (column - 1))
+    }
+
+    fn validate_size(size: usize) -> Result<(), RelationMatrixError> {
+        if (MIN_RELATION_SIZE..=MAX_RELATION_SIZE).contains(&size) {
+            Ok(())
+        } else {
+            Err(RelationMatrixError::InvalidSize {
+                size,
+                min: MIN_RELATION_SIZE,
+                max: MAX_RELATION_SIZE,
+            })
+        }
+    }
+
+    fn validate_element(&self, element: usize) -> Result<(), RelationMatrixError> {
+        if (1..=self.size).contains(&element) {
+            Ok(())
+        } else {
+            Err(RelationMatrixError::ElementOutOfBounds {
+                element,
+                size: self.size,
+            })
+        }
     }
 
     fn get_unchecked(&self, row: usize, column: usize) -> bool {
@@ -116,11 +197,11 @@ impl RelationMatrix {
         (1..=self.size).find(|&element| !self.get_unchecked(element, element))
     }
 
-    fn find_antisymmetry_witness(&self) -> Option<(usize, usize)> {
+    fn find_antisymmetry_witness(&self) -> Option<AntisymmetryWitness> {
         for left in 1..=self.size {
             for right in (left + 1)..=self.size {
                 if self.get_unchecked(left, right) && self.get_unchecked(right, left) {
-                    return Some((left, right));
+                    return Some(AntisymmetryWitness { left, right });
                 }
             }
         }
@@ -128,7 +209,7 @@ impl RelationMatrix {
         None
     }
 
-    fn find_transitivity_witness(&self) -> Option<(usize, usize, usize)> {
+    fn find_transitivity_witness(&self) -> Option<TransitivityWitness> {
         for source in 1..=self.size {
             for middle in 1..=self.size {
                 if !self.get_unchecked(source, middle) {
@@ -137,7 +218,11 @@ impl RelationMatrix {
 
                 for target in 1..=self.size {
                     if self.get_unchecked(middle, target) && !self.get_unchecked(source, target) {
-                        return Some((source, middle, target));
+                        return Some(TransitivityWitness {
+                            source,
+                            middle,
+                            target,
+                        });
                     }
                 }
             }
@@ -161,41 +246,35 @@ impl RelationMatrix {
     }
 }
 
-fn validate_size(size: usize) -> Result<(), RelationMatrixError> {
-    if (MIN_RELATION_SIZE..=MAX_RELATION_SIZE).contains(&size) {
-        Ok(())
-    } else {
-        Err(RelationMatrixError::InvalidSize {
-            size,
-            min: MIN_RELATION_SIZE,
-            max: MAX_RELATION_SIZE,
-        })
-    }
-}
-
-fn validate_element(element: usize, size: usize) -> Result<(), RelationMatrixError> {
-    if (1..=size).contains(&element) {
-        Ok(())
-    } else {
-        Err(RelationMatrixError::ElementOutOfBounds { element, size })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_RELATION_SIZE, MIN_RELATION_SIZE, PartialOrderDiagnostics, RelationMatrix,
-        RelationMatrixError,
+        AntisymmetryWitness, HasseCoverEdge, MAX_RELATION_SIZE, MIN_RELATION_SIZE,
+        PartialOrderDiagnostics, RelationMatrix, RelationMatrixError, TransitivityWitness,
     };
+
+    #[derive(Debug, Clone, Copy)]
+    struct RelationCell {
+        row: usize,
+        column: usize,
+    }
+
+    fn cell(row: usize, column: usize) -> RelationCell {
+        RelationCell { row, column }
+    }
+
+    fn edge(lower: usize, upper: usize) -> HasseCoverEdge {
+        HasseCoverEdge { lower, upper }
+    }
 
     fn matrix_with_true_pairs(
         size: usize,
-        pairs: &[(usize, usize)],
+        pairs: &[RelationCell],
     ) -> Result<RelationMatrix, RelationMatrixError> {
         let mut matrix = RelationMatrix::new(size)?;
 
-        for &(row, column) in pairs {
-            matrix.set(row, column, true)?;
+        for pair in pairs {
+            matrix.set(pair.row, pair.column, true)?;
         }
 
         Ok(matrix)
@@ -276,16 +355,32 @@ mod tests {
 
     #[test]
     fn validate_partial_order_accepts_valid_partial_order() {
-        let matrix = matrix_with_true_pairs(3, &[(1, 1), (2, 2), (3, 3), (1, 2), (1, 3), (2, 3)])
-            .expect("valid matrix must be created");
+        let matrix = matrix_with_true_pairs(
+            3,
+            &[
+                cell(1, 1),
+                cell(2, 2),
+                cell(3, 3),
+                cell(1, 2),
+                cell(1, 3),
+                cell(2, 3),
+            ],
+        )
+        .expect("valid matrix must be created");
 
         assert_eq!(matrix.validate_partial_order(), Ok(()));
     }
 
     #[test]
     fn validate_partial_order_reports_reflexivity_witness() {
-        let matrix = matrix_with_true_pairs(3, &[(1, 1), (3, 3)])
-            .expect("valid matrix must be created");
+        let matrix = matrix_with_true_pairs(
+            3,
+            &[
+                cell(1, 1),
+                cell(3, 3),
+            ],
+        )
+        .expect("valid matrix must be created");
 
         assert_eq!(
             matrix.validate_partial_order(),
@@ -299,14 +394,23 @@ mod tests {
 
     #[test]
     fn validate_partial_order_reports_antisymmetry_witness() {
-        let matrix = matrix_with_true_pairs(3, &[(1, 1), (2, 2), (3, 3), (1, 2), (2, 1)])
-            .expect("valid matrix must be created");
+        let matrix = matrix_with_true_pairs(
+            3,
+            &[
+                cell(1, 1),
+                cell(2, 2),
+                cell(3, 3),
+                cell(1, 2),
+                cell(2, 1),
+            ],
+        )
+        .expect("valid matrix must be created");
 
         assert_eq!(
             matrix.validate_partial_order(),
             Err(PartialOrderDiagnostics {
                 reflexivity_witness: None,
-                antisymmetry_witness: Some((1, 2)),
+                antisymmetry_witness: Some(AntisymmetryWitness { left: 1, right: 2 }),
                 transitivity_witness: None,
             })
         );
@@ -314,25 +418,51 @@ mod tests {
 
     #[test]
     fn validate_partial_order_reports_transitivity_witness() {
-        let matrix = matrix_with_true_pairs(3, &[(1, 1), (2, 2), (3, 3), (1, 2), (2, 3)])
-            .expect("valid matrix must be created");
+        let matrix = matrix_with_true_pairs(
+            3,
+            &[
+                cell(1, 1),
+                cell(2, 2),
+                cell(3, 3),
+                cell(1, 2),
+                cell(2, 3),
+            ],
+        )
+        .expect("valid matrix must be created");
 
         assert_eq!(
             matrix.validate_partial_order(),
             Err(PartialOrderDiagnostics {
                 reflexivity_witness: None,
                 antisymmetry_witness: None,
-                transitivity_witness: Some((1, 2, 3)),
+                transitivity_witness: Some(TransitivityWitness {
+                    source: 1,
+                    middle: 2,
+                    target: 3,
+                }),
             })
         );
     }
 
     #[test]
     fn hasse_cover_edges_exclude_transitive_chain_edge() {
-        let matrix = matrix_with_true_pairs(3, &[(1, 1), (2, 2), (3, 3), (1, 2), (2, 3), (1, 3)])
-            .expect("valid matrix must be created");
+        let matrix = matrix_with_true_pairs(
+            3,
+            &[
+                cell(1, 1),
+                cell(2, 2),
+                cell(3, 3),
+                cell(1, 2),
+                cell(2, 3),
+                cell(1, 3),
+            ],
+        )
+        .expect("valid matrix must be created");
 
-        assert_eq!(matrix.hasse_cover_edges(), Ok(vec![(1, 2), (2, 3)]));
+        assert_eq!(
+            matrix.hasse_cover_edges(),
+            Ok(vec![edge(1, 2), edge(2, 3)])
+        );
     }
 
     #[test]
@@ -340,36 +470,49 @@ mod tests {
         let matrix = matrix_with_true_pairs(
             4,
             &[
-                (1, 1),
-                (2, 2),
-                (3, 3),
-                (4, 4),
-                (1, 2),
-                (1, 3),
-                (1, 4),
-                (2, 4),
-                (3, 4),
+                cell(1, 1),
+                cell(2, 2),
+                cell(3, 3),
+                cell(4, 4),
+                cell(1, 2),
+                cell(1, 3),
+                cell(1, 4),
+                cell(2, 4),
+                cell(3, 4),
             ],
         )
         .expect("valid matrix must be created");
 
         assert_eq!(
             matrix.hasse_cover_edges(),
-            Ok(vec![(1, 2), (1, 3), (2, 4), (3, 4)])
+            Ok(vec![edge(1, 2), edge(1, 3), edge(2, 4), edge(3, 4)])
         );
     }
 
     #[test]
     fn hasse_cover_edges_return_validation_error_for_invalid_relation() {
-        let matrix = matrix_with_true_pairs(3, &[(1, 1), (2, 2), (3, 3), (1, 2), (2, 3)])
-            .expect("valid matrix must be created");
+        let matrix = matrix_with_true_pairs(
+            3,
+            &[
+                cell(1, 1),
+                cell(2, 2),
+                cell(3, 3),
+                cell(1, 2),
+                cell(2, 3),
+            ],
+        )
+        .expect("valid matrix must be created");
 
         assert_eq!(
             matrix.hasse_cover_edges(),
             Err(PartialOrderDiagnostics {
                 reflexivity_witness: None,
                 antisymmetry_witness: None,
-                transitivity_witness: Some((1, 2, 3)),
+                transitivity_witness: Some(TransitivityWitness {
+                    source: 1,
+                    middle: 2,
+                    target: 3,
+                }),
             })
         );
     }
