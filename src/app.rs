@@ -2,21 +2,18 @@ use crate::bootstrap::BootstrapState;
 use crate::gui_state::HasseGuiState;
 use crate::relation_matrix::{MAX_RELATION_SIZE, MIN_RELATION_SIZE};
 
-pub fn run() -> eframe::Result<()> {
+pub fn run() -> crate::AppResult<()> {
     let state = BootstrapState::new();
     let title = state.app_title().to_owned();
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1080.0, 760.0])
-            .with_min_inner_size([820.0, 560.0]),
-        ..Default::default()
-    };
+    let settings = egui_software_backend::SoftwareBackendAppConfiguration::new()
+        .title(Some(title))
+        .inner_size(Some(egui::vec2(1080.0, 760.0)))
+        .min_inner_size(Some(egui::vec2(820.0, 560.0)));
 
-    eframe::run_native(
-        &title,
-        options,
-        Box::new(move |_cc| Ok(Box::new(HasseBootstrapApp::new(state)))),
-    )
+    egui_software_backend::run_app_with_software_backend(settings, move |_context| {
+        HasseBootstrapApp::new(state.clone())
+    })
+    .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)
 }
 
 struct HasseBootstrapApp {
@@ -33,8 +30,12 @@ impl HasseBootstrapApp {
     }
 }
 
-impl eframe::App for HasseBootstrapApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+impl egui_software_backend::App for HasseBootstrapApp {
+    fn update(
+        &mut self,
+        ctx: &egui::Context,
+        _software_backend: &mut egui_software_backend::SoftwareBackend,
+    ) {
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = egui::Color32::from_rgb(14, 18, 26);
         visuals.extreme_bg_color = egui::Color32::from_rgb(20, 27, 39);

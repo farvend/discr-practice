@@ -4,5 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-eframe = "0.33"
 egui = "0.33"
+egui_software_backend = "0.0.2"
+
+[profile.dev.package."*"]
+opt-level = 3

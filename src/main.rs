@@ -1,3 +1,3 @@
-fn main() -> eframe::Result<()> {
+fn main() -> practice::AppResult<()> {
     practice::run()
 }

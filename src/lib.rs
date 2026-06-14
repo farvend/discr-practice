@@ -5,6 +5,8 @@ pub mod hasse_layout;
 pub mod relation_matrix;
 mod rendered_diagram;
 
-pub fn run() -> eframe::Result<()> {
+pub type AppResult<T> = Result<T, Box<dyn std::error::Error>>;
+
+pub fn run() -> AppResult<()> {
     app::run()
 }
